@@ -99,13 +99,17 @@ func signPolicy(key *ecdsa.PrivateKey, profile string, version, now uint64, ttl 
 	return blob.Bytes(), nil
 }
 
+func authorizedWorkflow() bool {
+	return os.Getenv("GITHUB_ACTIONS") == "true" && os.Getenv("GITHUB_EVENT_NAME") == "workflow_dispatch" &&
+		os.Getenv("GITHUB_REF") == "refs/heads/main" && os.Getenv("GITHUB_REPOSITORY") == "YSheldon/KProPolicySigning"
+}
+
 func run() error {
 	profile := flag.String("profile", "maximum", "maximum, low-interference, disabled")
 	output := flag.String("output", "signed-output", "new output directory")
 	flag.Parse()
 	// Production key use is restricted to the protected manually-approved job.
-	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("GITHUB_EVENT_NAME") != "workflow_dispatch" ||
-		os.Getenv("GITHUB_REF") != "refs/heads/main" || os.Getenv("GITHUB_REPOSITORY") != "YSheldon/KProPolicySigning" {
+	if !authorizedWorkflow() {
 		return errors.New("protected GitHub workflow required")
 	}
 	key, err := loadKey()
@@ -125,7 +129,9 @@ func run() error {
 	}
 	digest := sha256.Sum256(blob)
 	receipt := map[string]any{"schema": "KProPolicySigningReceipt/v1", "profile": *profile, "protocolVersion": 4,
-		"keyVersion": keyVersion, "policyVersion": uint64(now.UnixMilli()), "notAfterUnixSeconds": now.Unix() + 31536000,
+		"sourceCommit": os.Getenv("GITHUB_SHA"), "workflowRunId": os.Getenv("GITHUB_RUN_ID"),
+		"receiptIsSigned": false,
+		"keyVersion":      keyVersion, "policyVersion": uint64(now.UnixMilli()), "notAfterUnixSeconds": now.Unix() + 31536000,
 		"policyFlags": binary.LittleEndian.Uint32(blob[80:84]), "protectedObjectCount": 0, "envelopeSha256": hex.EncodeToString(digest[:]),
 		"publicKeySha256": expectedPublicSHA256, "signatureVerified": true, "driverAcceptanceTested": false}
 	encoded, _ := json.MarshalIndent(receipt, "", "  ")
