@@ -1,0 +1,47 @@
+name: Approved policy signing
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Reviewed consumer protection profile (no personal paths)
+        type: choice
+        required: true
+        default: maximum
+        options:
+          - maximum
+          - low-interference
+          - disabled
+permissions:
+  contents: read
+concurrency:
+  group: production-policy-signing
+  cancel-in-progress: false
+jobs:
+  sign-policy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-policy-signing
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.26.3'
+          cache: false
+      - run: go test ./... && go vet ./... && go build -o policy-signer .
+      - name: Sign the approved fixed profile
+        env:
+          KPRO_POLICY_PRIVATE_KEY_B64: ${{ secrets.KPRO_POLICY_PRIVATE_KEY_B64 }}
+          POLICY_PROFILE: ${{ inputs.profile }}
+        run: ./policy-signer --profile "$POLICY_PROFILE" --output signed-output
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: signed-policy-${{ inputs.profile }}-${{ github.run_id }}
+          path: |
+            signed-output/default-policy.hex
+            signed-output/receipt.json
+          if-no-files-found: error
+          retention-days: 7
