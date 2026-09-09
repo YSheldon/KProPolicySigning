@@ -20,15 +20,19 @@ func TestEnvelopeLayoutAndSignature(t *testing.T) {
 		t.Fatal(err)
 	}
 	for profile, flags := range map[string]uint32{"maximum": 5, "low-interference": 1, "disabled": 0} {
+		payloadSize := 72
+		if flags&4 != 0 {
+			payloadSize = 92
+		}
 		blob, err := signPolicy(key, profile, 1788860000001, 1788860000, 86400)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(blob) != 184 {
+		if len(blob) != 48+payloadSize+64 {
 			t.Fatal("invalid envelope size")
 		}
 		if binary.LittleEndian.Uint32(blob[0:4]) != 0x4f52504b || binary.LittleEndian.Uint16(blob[4:6]) != 4 ||
-			binary.LittleEndian.Uint16(blob[6:8]) != 48 || binary.LittleEndian.Uint32(blob[12:16]) != 72 ||
+			binary.LittleEndian.Uint16(blob[6:8]) != 48 || binary.LittleEndian.Uint32(blob[12:16]) != uint32(payloadSize) ||
 			binary.LittleEndian.Uint32(blob[16:20]) != 64 || binary.LittleEndian.Uint32(blob[20:24]) != 20260531 {
 			t.Fatal("invalid header ABI")
 		}
@@ -39,8 +43,20 @@ func TestEnvelopeLayoutAndSignature(t *testing.T) {
 		}
 		if binary.LittleEndian.Uint64(blob[24:32]) != 0x4b50524f414c4552 ||
 			binary.LittleEndian.Uint64(blob[56:64]) != 1788860000 || binary.LittleEndian.Uint64(blob[64:72]) != 1788946400 ||
-			binary.LittleEndian.Uint32(blob[72:76]) != 3 || binary.LittleEndian.Uint32(blob[84:88]) != 0 {
+			binary.LittleEndian.Uint32(blob[72:76]) != 3 {
 			t.Fatal("invalid policy ABI")
+		}
+		if flags&4 != 0 {
+			if binary.LittleEndian.Uint32(blob[84:88]) != 72 ||
+				binary.LittleEndian.Uint32(blob[120:124]) != 0x5845504b ||
+				binary.LittleEndian.Uint16(blob[124:126]) != 1 ||
+				binary.LittleEndian.Uint16(blob[126:128]) != 20 ||
+				binary.LittleEndian.Uint32(blob[128:132]) != 20 ||
+				binary.LittleEndian.Uint64(blob[132:140]) != 0 {
+				t.Fatal("missing required empty risk-block extension")
+			}
+		} else if binary.LittleEndian.Uint32(blob[84:88]) != 0 {
+			t.Fatal("unexpected extension")
 		}
 		if binary.LittleEndian.Uint32(blob[8:12]) != 2 {
 			t.Fatal("wrong command")
@@ -51,8 +67,9 @@ func TestEnvelopeLayoutAndSignature(t *testing.T) {
 		if binary.LittleEndian.Uint32(blob[76:80]) != 0 {
 			t.Fatal("unexpected directory objects")
 		}
-		digest := sha256.Sum256(blob[:120])
-		if !ecdsa.Verify(&key.PublicKey, digest[:], new(big.Int).SetBytes(blob[120:152]), new(big.Int).SetBytes(blob[152:])) {
+		signedLength := len(blob) - 64
+		digest := sha256.Sum256(blob[:signedLength])
+		if !ecdsa.Verify(&key.PublicKey, digest[:], new(big.Int).SetBytes(blob[signedLength:signedLength+32]), new(big.Int).SetBytes(blob[signedLength+32:])) {
 			t.Fatal("signature failed")
 		}
 	}

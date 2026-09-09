@@ -80,12 +80,22 @@ func signPolicy(key *ecdsa.PrivateKey, profile string, version, now uint64, ttl 
 	}
 	policyHash := sha256.Sum256(canonical.Bytes())
 	var blob bytes.Buffer
-	// Public ABI: 48-byte header, 72-byte snapshot, 64-byte P1363 signature.
-	for _, v := range []any{uint32(0x4f52504b), uint16(4), uint16(48), uint32(2), uint32(72), uint32(64), keyVersion,
-		uint64(0x4b50524f414c4552), version, version, version, now, now + uint64(ttl), uint32(3), uint32(0), flags, uint32(0)} {
+	payloadSize, extensionOffset := uint32(72), uint32(0)
+	if flags&4 != 0 {
+		payloadSize += 20
+		extensionOffset = 72
+	}
+	// Risk-block enablement requires an extension even with zero exclusions.
+	for _, v := range []any{uint32(0x4f52504b), uint16(4), uint16(48), uint32(2), payloadSize, uint32(64), keyVersion,
+		uint64(0x4b50524f414c4552), version, version, version, now, now + uint64(ttl), uint32(3), uint32(0), flags, extensionOffset} {
 		binary.Write(&blob, binary.LittleEndian, v)
 	}
 	blob.Write(policyHash[:])
+	if extensionOffset != 0 {
+		for _, v := range []any{uint32(0x5845504b), uint16(1), uint16(20), uint32(20), uint32(0), uint32(0)} {
+			binary.Write(&blob, binary.LittleEndian, v)
+		}
+	}
 	digest := sha256.Sum256(blob.Bytes())
 	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
 	if err != nil {
