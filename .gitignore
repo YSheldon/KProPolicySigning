@@ -1,0 +1,6 @@
+signed-output/
+policy-signer
+policy-signer.exe
+*.private.json
+*.pem
+*.key
